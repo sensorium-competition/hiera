@@ -1,95 +1,108 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0" 
-os.environ["WORLD_SIZE"] = "1"
-
 import torch
 from hiera.hiera import Hiera
 from hiera.benchmarking import benchmark
 
-model_bkbn = 'hiera-2d' # 'hiera-2d' or 'hiera-3d'
+def main():
+    # Set environment variables
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ["WORLD_SIZE"] = "1"
 
-if model_bkbn == "hiera-2d":
-    video_size = [32, 64]
-    in_channels = 3
-if model_bkbn == "hiera-3d":
-    video_size = [32, 64]
-    in_channels = 6
-    
-batchsize=64
+    # Model configuration
+    MODEL_BACKBONE = "hiera-2d"  # Options: 'hiera-2d' or 'hiera-3d'
+    BATCH_SIZE = 64
+    SCREEN_CHUNK_SIZE = 30
+    SCREEN_SAMPLING_RATE = 30
+    RESPONSE_CHUNK_SIZE = 8
+    RESPONSE_SAMPLING_RATE = 8
+    BEHAVIOR_AS_CHANNELS = True
+    REPLACE_NANS_WITH_MEANS = True
+    DIM_HEAD = 64
+    NUM_HEADS = 2
+    DROP_PATH_RATE = 0
+    MLP_RATIO = 4
 
-screen_chunk_size = 30
-screen_sampling_rate = 30
+    # Set video size and input channels based on model backbone
+    if MODEL_BACKBONE == "hiera-2d":
+        VIDEO_SIZE = [32, 64]
+        IN_CHANNELS = 3
+    elif MODEL_BACKBONE == "hiera-3d":
+        VIDEO_SIZE = [32, 64]
+        IN_CHANNELS = 6
+    else:
+        raise ValueError("Invalid model backbone specified")
 
-response_chunk_size = 8
-response_sampling_rate = 8
+    # Initialize Hiera model
+    if MODEL_BACKBONE == "hiera-2d":
+        model = Hiera(
+            input_size=(VIDEO_SIZE[0], VIDEO_SIZE[1]),
+            num_heads=1,
+            embed_dim=96,
+            stages=(2, 1),  # 3 transformer layers
+            q_pool=1,
+            in_chans=IN_CHANNELS,
+            q_stride=(1, 1),
+            mask_unit_size=(8, 8),
+            patch_kernel=(5, 5),
+            patch_stride=(2, 2),
+            patch_padding=(2, 2),
+            sep_pos_embed=False,
+            drop_path_rate=DROP_PATH_RATE,
+            mlp_ratio=MLP_RATIO,
+        )
+    elif MODEL_BACKBONE == "hiera-3d":
+        model = Hiera(
+            input_size=(SCREEN_CHUNK_SIZE, VIDEO_SIZE[0], VIDEO_SIZE[1]),
+            num_heads=3,
+            embed_dim=96,
+            stages=(2, 1),  # 3 transformer layers
+            q_pool=1,
+            in_chans=IN_CHANNELS,
+            q_stride=(1, 1, 1),
+            mask_unit_size=(1, 8, 8),
+            patch_kernel=(5, 5, 5),
+            patch_stride=(3, 2, 2),
+            patch_padding=(1, 2, 2),
+            sep_pos_embed=True,
+            drop_path_rate=DROP_PATH_RATE,
+            mlp_ratio=MLP_RATIO,
+        )
 
-behavior_as_channels = True
-replace_nans_with_means = True
+    # Move model to GPU and set precision
+    model = model.cuda().to(torch.float32)
 
-dim_head = 64
-num_heads = 2
-drop_path_rate = 0
-mlp_ratio=4
+    # Create example input
+    if MODEL_BACKBONE == "hiera-2d":
+        example_input = torch.ones(8, IN_CHANNELS, VIDEO_SIZE[0], VIDEO_SIZE[1], device="cuda", dtype=torch.float32)
+    elif MODEL_BACKBONE == "hiera-3d":
+        example_input = torch.ones(8, IN_CHANNELS, SCREEN_CHUNK_SIZE, VIDEO_SIZE[0], VIDEO_SIZE[1], device="cuda", dtype=torch.float32)
 
+    # Forward pass
+    output = model(example_input, return_intermediates=True)
+    hiera_output = output[-1][-1]
+    print("Output shape:", hiera_output.shape)  # Expected: (b, t, h, w, c)
 
-if model_bkbn == 'hiera-2d':
-    tiny_hiera = Hiera(input_size=(video_size[0], video_size[1]),
-                        num_heads=1,
-                        embed_dim=96,
-                        stages=(2, 1,), # 3 transformer layers 
-                        q_pool=1, 
-                        in_chans=in_channels,
-                        q_stride=(1, 1,),
-                        mask_unit_size=(8, 8),
-                        patch_kernel=(5, 5),
-                        patch_stride=(2, 2),
-                        patch_padding=(2, 2),
-                        sep_pos_embed=False, # True for 3D
-                        drop_path_rate=drop_path_rate,
-                        mlp_ratio=4,)
-elif model_bkbn == 'hiera-3d':
-    tiny_hiera = Hiera(input_size=(screen_chunk_size, video_size[0], video_size[1]),
-                        num_heads=3,
-                        embed_dim=96,
-                        stages=(2, 1,), # 3 transformer layers 
-                        q_pool=1, 
-                        in_chans=in_channels,
-                        q_stride=(1, 1, 1,),
-                        mask_unit_size=(1, 8, 8),
-                        patch_kernel=(5, 5, 5),
-                        patch_stride=(3, 2, 2),
-                        patch_padding=(1, 2, 2),
-                        sep_pos_embed=True, # True for 3D
-                        drop_path_rate=drop_path_rate,
-                        mlp_ratio=4,)
-
-tiny_hiera = tiny_hiera.cuda().to(torch.float32);
-if model_bkbn == "hiera-2d":
-    example_input = torch.ones(8,in_channels, video_size[0], video_size[1]).to("cuda", torch.float32)
-    out = tiny_hiera(example_input, return_intermediates=True)
-if model_bkbn == "hiera-3d":
-    example_input = torch.ones(8,in_channels,screen_chunk_size, video_size[0], video_size[1]).to("cuda", torch.float32)
-    out = tiny_hiera(example_input, return_intermediates=True)
-
-hiera_output = out[-1][-1]
-hiera_output.shape # (b, t, h, w, c): (8, 4, 9, 16, 192)
-print(hiera_output.shape)
-
-# exit()
-
-if model_bkbn == 'hiera-2d':
-    benchmark(model=tiny_hiera, 
-          device=0,
-          input_size=(in_channels, video_size[0], video_size[1]),
-          batch_size=batchsize,
-          runs=100,
-          use_fp16=True,
-          verbose=True)
-elif model_bkbn == 'hiera-3d':
-    benchmark(model=tiny_hiera, 
+    # Benchmark the model
+    if MODEL_BACKBONE == "hiera-2d":
+        benchmark(
+            model=model,
             device=0,
-            input_size=(in_channels, screen_chunk_size, video_size[0], video_size[1]),
-            batch_size=batchsize,
+            input_size=(IN_CHANNELS, VIDEO_SIZE[0], VIDEO_SIZE[1]),
+            batch_size=BATCH_SIZE,
             runs=100,
             use_fp16=True,
-            verbose=True)
+            verbose=True,
+        )
+    elif MODEL_BACKBONE == "hiera-3d":
+        benchmark(
+            model=model,
+            device=0,
+            input_size=(IN_CHANNELS, SCREEN_CHUNK_SIZE, VIDEO_SIZE[0], VIDEO_SIZE[1]),
+            batch_size=BATCH_SIZE,
+            runs=100,
+            use_fp16=True,
+            verbose=True,
+        )
+
+if __name__ == "__main__":
+    main()
