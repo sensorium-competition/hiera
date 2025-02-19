@@ -1,6 +1,4 @@
 import os
-import torch
-from hiera.hiera import Hiera
 from hiera.benchmarking import tiny_mouse_hiera_benchmark
 
 # Set environment variables
