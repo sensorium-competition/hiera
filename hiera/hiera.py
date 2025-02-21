@@ -101,17 +101,15 @@ class MaskUnitAttention(nn.Module):
         if hasattr(F, "scaled_dot_product_attention"):
             if self.force_fa:
                 with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
-                    # x_dtype = x.dtype
                     q_shape = q.shape
                         
-                    q = q.view(B, self.heads, -1, self.head_dim)#.to(dtype=torch.float16)  # (B, H, S, D)
-                    k = k.view(B, self.heads, -1, self.head_dim)#.to(dtype=torch.float16)  # (B, H, S, D)
-                    v = v.view(B, self.heads, -1, self.head_dim)#.to(dtype=torch.float16)  # (B, H, S, D)
+                    q = q.view(B, self.heads, -1, self.head_dim)  # (B, H, S, D)
+                    k = k.view(B, self.heads, -1, self.head_dim)  # (B, H, S, D)
+                    v = v.view(B, self.heads, -1, self.head_dim)  # (B, H, S, D)
                     
                     x = F.scaled_dot_product_attention(q, k, v)
                     
                     x = x.view(q_shape)
-                    # x = x.to(dtype=x_dtype)
             else:
                 x = F.scaled_dot_product_attention(q, k, v)
         else:
