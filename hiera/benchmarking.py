@@ -90,7 +90,8 @@ def tiny_mouse_hiera_benchmark(
     dim_head = 64,
     num_heads = 2,
     drop_path_rate = 0,
-    mlp_ratio = 4):
+    mlp_ratio = 4,
+    force_fa = True):
 
     # Set video size and input channels based on model backbone
     if model_backbone == "hiera-2d":
@@ -119,6 +120,7 @@ def tiny_mouse_hiera_benchmark(
             sep_pos_embed=False,
             drop_path_rate=drop_path_rate,
             mlp_ratio=mlp_ratio,
+            force_fa=force_fa
         )
     else:  # model_backbone == "hiera-3d"
         model = Hiera(
@@ -136,6 +138,7 @@ def tiny_mouse_hiera_benchmark(
             sep_pos_embed=True,
             drop_path_rate=drop_path_rate,
             mlp_ratio=mlp_ratio,
+            force_fa=force_fa
         )
 
     # Move model to GPU and set precision
