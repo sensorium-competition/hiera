@@ -91,7 +91,8 @@ def tiny_mouse_hiera_benchmark(
     num_heads = 2,
     drop_path_rate = 0,
     mlp_ratio = 4,
-    force_fa = True):
+    force_fa = True,
+    use_fp16 = True):
 
     # Set video size and input channels based on model backbone
     if model_backbone == "hiera-2d":
@@ -156,10 +157,10 @@ def tiny_mouse_hiera_benchmark(
             device="cuda", dtype=torch.float32
         )
 
-    # Forward pass
-    output = model(example_input, return_intermediates=True)
-    hiera_output = output[-1][-1]
-    print("Output shape:", hiera_output.shape)  # Expected: (b, t, h, w, c)
+    # # Forward pass
+    # output = model(example_input, return_intermediates=True)
+    # hiera_output = output[-1][-1]
+    # print("Output shape:", hiera_output.shape)  # Expected: (b, t, h, w, c)
 
     # Benchmark the model
     benchmark(
@@ -168,6 +169,6 @@ def tiny_mouse_hiera_benchmark(
         input_size=(in_channels, *([screen_chunk_size] if model_backbone == "hiera-3d" else []), video_size[0], video_size[1]),
         batch_size=batch_size,
         runs=100,
-        use_fp16=True,
+        use_fp16=use_fp16,
         verbose=True,
     )
