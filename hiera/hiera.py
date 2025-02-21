@@ -25,6 +25,7 @@ from typing import List, Tuple, Callable, Optional, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from timm.models.layers import DropPath, Mlp
 
@@ -48,6 +49,7 @@ class MaskUnitAttention(nn.Module):
         q_stride: int = 1,
         window_size: int = 0,
         use_mask_unit_attn: bool = False,
+        force_fa=True,
     ):
         """
         Args:
@@ -73,6 +75,8 @@ class MaskUnitAttention(nn.Module):
         self.window_size = window_size
         self.use_mask_unit_attn = use_mask_unit_attn
 
+        self.force_fa = force_fa
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """ Input should be of shape [batch, tokens, channels]. """
         B, N, _ = x.shape
@@ -84,7 +88,7 @@ class MaskUnitAttention(nn.Module):
             self.qkv(x)
             .reshape(B, -1, num_windows, 3, self.heads, self.head_dim)
             .permute(3, 0, 4, 2, 1, 5)
-        )
+        ).contiguous() # condition of flash attention .to(dtype=torch.float16, device="cuda")
         q, k, v = qkv[0], qkv[1], qkv[2]
 
         if self.q_stride > 1:
@@ -94,10 +98,20 @@ class MaskUnitAttention(nn.Module):
                 .max(dim=3)
                 .values
             )
-
         if hasattr(F, "scaled_dot_product_attention"):
-            # Note: the original paper did *not* use SDPA, it's a free boost!
-            x = F.scaled_dot_product_attention(q, k, v)
+            if self.force_fa:
+                with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+                    q_shape = q.shape
+                        
+                    q = q.view(B, self.heads, -1, self.head_dim)  # (B, H, S, D)
+                    k = k.view(B, self.heads, -1, self.head_dim)  # (B, H, S, D)
+                    v = v.view(B, self.heads, -1, self.head_dim)  # (B, H, S, D)
+                    
+                    x = F.scaled_dot_product_attention(q, k, v)
+                    
+                    x = x.view(q_shape)
+            else:
+                x = F.scaled_dot_product_attention(q, k, v)
         else:
             attn = (q * self.scale) @ k.transpose(-1, -2)
             attn = attn.softmax(dim=-1)
@@ -121,6 +135,7 @@ class HieraBlock(nn.Module):
         q_stride: int = 1,
         window_size: int = 0,
         use_mask_unit_attn: bool = False,
+        force_fa: bool = True,
     ):
         super().__init__()
 
@@ -129,7 +144,7 @@ class HieraBlock(nn.Module):
 
         self.norm1 = norm_layer(dim)
         self.attn = MaskUnitAttention(
-            dim, dim_out, heads, q_stride, window_size, use_mask_unit_attn
+            dim, dim_out, heads, q_stride, window_size, use_mask_unit_attn, force_fa
         )
 
         self.norm2 = norm_layer(dim_out)
@@ -230,6 +245,7 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
         head_dropout: float = 0.0,
         head_init_scale: float = 0.001,
         sep_pos_embed: bool = False,
+        force_fa: bool = True,
     ):
         super().__init__()
 
@@ -315,6 +331,7 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
                 q_stride=(flat_q_stride if i in q_pool_blocks else 1),
                 window_size=flat_mu_size,
                 use_mask_unit_attn=use_mask_unit_attn,
+                force_fa=force_fa,
             )
 
             embed_dim = dim_out
